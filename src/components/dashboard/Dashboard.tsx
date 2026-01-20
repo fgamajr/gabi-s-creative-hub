@@ -2,15 +2,34 @@ import { useState } from 'react';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { Sidebar } from './Sidebar';
 import { DashboardHeader } from './DashboardHeader';
-import { MetricCard } from './MetricCard';
-import { PipelineCard } from './PipelineCard';
-import { DataSourcesTable } from './DataSourcesTable';
+import { PipelineTimeline } from './PipelineTimeline';
+import { CoverageGrid } from './CoverageGrid';
+import { ErrorsPanel } from './ErrorsPanel';
+import { HistoryChart } from './HistoryChart';
+import { JobsList } from './JobsList';
 import { LoadingState, ErrorState } from './LoadingState';
-import type { NavigationPage, PipelineStage } from '@/types/dashboard';
+import type { NavigationPage } from '@/types/dashboard';
 
 export function Dashboard() {
-  const [currentPage, setCurrentPage] = useState<NavigationPage>('overview');
-  const { stats, jobs, loading, error, lastUpdated, useMockData, refetch } = useDashboardData();
+  const [currentPage, setCurrentPage] = useState<NavigationPage>('pipeline');
+  const [selectedStage, setSelectedStage] = useState<string | null>(null);
+  
+  const { 
+    stats, 
+    enrichedJobs,
+    pipelineData,
+    sourceCoverage,
+    errors,
+    historicalMetrics,
+    historyPeriod,
+    setHistoryPeriod,
+    loading, 
+    error, 
+    lastUpdated, 
+    useMockData, 
+    refetch 
+  } = useDashboardData();
+  
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefresh = async () => {
@@ -27,53 +46,28 @@ export function Dashboard() {
     return <ErrorState message={error} onRetry={refetch} />;
   }
 
-  const totalDocs = stats?.total_documents || 0;
-  const esDocs = jobs?.total_elastic_docs || 0;
-  const syncJobs = jobs?.sync_jobs || [];
-  const sources = stats?.sources || [];
-
-  const pipelineStages: PipelineStage[] = [
-    {
-      id: 'harvest',
-      label: 'Harvest',
-      description: 'Download de arquivos CSV',
-      icon: 'CloudDownload',
-      color: 'blue',
-      value: syncJobs.length.toString(),
-      subtitle: 'sync states',
-      status: 'completed'
+  const pageConfig = {
+    pipeline: {
+      title: 'Pipeline Monitor',
+      subtitle: 'Real-time document processing flow'
     },
-    {
-      id: 'sync',
-      label: 'Sync',
-      description: 'Sincronização com banco',
-      icon: 'Database',
-      color: 'purple',
-      value: totalDocs.toLocaleString('pt-BR'),
-      subtitle: 'documentos no PostgreSQL',
-      status: 'completed'
+    jobs: {
+      title: 'Jobs Overview',
+      subtitle: 'All sync and indexing jobs'
     },
-    {
-      id: 'ingest',
-      label: 'Ingest',
-      description: 'Processamento e parsing',
-      icon: 'FileText',
-      color: 'green',
-      value: totalDocs.toLocaleString('pt-BR'),
-      subtitle: 'documentos ingeridos',
-      status: 'completed'
+    coverage: {
+      title: 'Data Coverage',
+      subtitle: 'Completeness and gaps analysis'
     },
-    {
-      id: 'index',
-      label: 'Index',
-      description: 'Indexação Elasticsearch',
-      icon: 'Search',
-      color: 'yellow',
-      value: esDocs.toLocaleString('pt-BR'),
-      subtitle: 'documentos indexados',
-      status: 'completed'
+    errors: {
+      title: 'Error Management',
+      subtitle: 'Failed jobs and error tracking'
+    },
+    settings: {
+      title: 'Settings',
+      subtitle: 'Configure pipeline and alerts'
     }
-  ];
+  };
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -81,62 +75,78 @@ export function Dashboard() {
         currentPage={currentPage} 
         onPageChange={setCurrentPage}
         isConnected={stats?.elasticsearch_available ?? false}
+        errorCount={errors.length}
       />
 
       <main className="flex-1 p-8 overflow-auto">
         <DashboardHeader
-          title="Dashboard Overview"
-          subtitle="Real-time monitoring of document pipeline"
+          title={pageConfig[currentPage].title}
+          subtitle={pageConfig[currentPage].subtitle}
           onRefresh={handleRefresh}
           isRefreshing={isRefreshing}
           lastUpdated={lastUpdated}
           useMockData={useMockData}
         />
 
-        {/* Metrics Overview */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <MetricCard
-            title="Total Documents"
-            value={totalDocs}
-            trend="+12%"
-            icon="FileText"
-          />
-          <MetricCard
-            title="Indexed Documents"
-            value={esDocs}
-            icon="Search"
-          />
-          <MetricCard
-            title="Data Sources"
-            value={sources.length}
-            icon="Database"
-          />
-          <MetricCard
-            title="Sync Jobs"
-            value={syncJobs.length}
-            icon="Activity"
-          />
-        </section>
-
-        {/* Pipeline Status */}
-        <section className="mb-8">
-          <h2 className="text-lg font-semibold text-foreground mb-4">Pipeline Status</h2>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {pipelineStages.map((stage) => (
-              <PipelineCard 
-                key={stage.id} 
-                stage={stage} 
-                jobs={syncJobs}
+        {/* Pipeline Page */}
+        {currentPage === 'pipeline' && (
+          <div className="space-y-6">
+            <PipelineTimeline 
+              stagesData={pipelineData}
+              jobs={enrichedJobs}
+              onStageClick={setSelectedStage}
+              selectedStage={selectedStage}
+            />
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <ErrorsPanel errors={errors} />
+              <HistoryChart 
+                metrics={historicalMetrics}
+                period={historyPeriod}
+                onPeriodChange={setHistoryPeriod}
               />
-            ))}
+            </div>
+            
+            <CoverageGrid coverage={sourceCoverage} />
           </div>
-        </section>
+        )}
 
-        {/* Data Sources */}
-        <section>
-          <h2 className="text-lg font-semibold text-foreground mb-4">Data Sources</h2>
-          <DataSourcesTable sources={sources} />
-        </section>
+        {/* Jobs Page */}
+        {currentPage === 'jobs' && (
+          <JobsList jobs={enrichedJobs} />
+        )}
+
+        {/* Coverage Page */}
+        {currentPage === 'coverage' && (
+          <div className="space-y-6">
+            <CoverageGrid coverage={sourceCoverage} />
+            <HistoryChart 
+              metrics={historicalMetrics}
+              period={historyPeriod}
+              onPeriodChange={setHistoryPeriod}
+            />
+          </div>
+        )}
+
+        {/* Errors Page */}
+        {currentPage === 'errors' && (
+          <div className="space-y-6">
+            <ErrorsPanel errors={errors} />
+            <JobsList 
+              jobs={enrichedJobs.filter(j => j.status === 'failed')} 
+              title="Failed Jobs"
+            />
+          </div>
+        )}
+
+        {/* Settings Page */}
+        {currentPage === 'settings' && (
+          <div className="bg-card rounded-2xl border border-border p-8 text-center">
+            <div className="text-muted-foreground">
+              Settings page - Configure alerts, thresholds, and pipeline behavior
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
